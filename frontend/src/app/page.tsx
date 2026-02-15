@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from 'react';
-import { Upload, ArrowRight, Brain, Waves, Heart, Eye, Layers, Shield, Zap } from 'lucide-react';
+import { Upload, ArrowRight, Brain, Waves, Heart, Eye, Layers, Shield } from 'lucide-react';
 
 interface AnalysisResult {
   cancer_type: string;
