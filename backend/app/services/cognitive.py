@@ -1,5 +1,6 @@
 import os
 import json
+import collections
 from app.models.schemas import LLMInput, LLMOutput
 from dotenv import load_dotenv
 
@@ -16,9 +17,29 @@ class CognitiveService:
         else:
             self.model = None
 
+        # LRU Cache
+        self._cache = collections.OrderedDict()
+        self._max_cache_size = 100
+
     def analyze(self, data: LLMInput) -> LLMOutput:
+        # Generate cache key with sorted lists for consistency
+        input_dict = data.model_dump()
+        if 'symptoms' in input_dict and isinstance(input_dict['symptoms'], list):
+            input_dict['symptoms'].sort()
+        if 'risk_factors' in input_dict and isinstance(input_dict['risk_factors'], list):
+            input_dict['risk_factors'].sort()
+
+        cache_key = json.dumps(input_dict, sort_keys=True)
+
+        # Check cache
+        if cache_key in self._cache:
+            self._cache.move_to_end(cache_key)
+            return self._cache[cache_key]
+
         if not self.model:
-            return self._mock_response(data)
+            result = self._mock_response(data)
+            self._cache_result(cache_key, result)
+            return result
 
         system_prompt = """You are a medical triage decision-support assistant.
 
@@ -81,11 +102,22 @@ Respond ONLY in valid JSON with this exact format:
             
             content = response.text
             parsed = json.loads(content)
-            return LLMOutput(**parsed)
+            result = LLMOutput(**parsed)
+            self._cache_result(cache_key, result)
+            return result
             
         except Exception as e:
             print(f"LLM Error: {e}")
-            return self._mock_response(data)
+            result = self._mock_response(data)
+            # Do not cache error fallbacks usually, but mock response is deterministic enough if needed.
+            # But usually we want to retry errors.
+            return result
+
+    def _cache_result(self, key, result):
+        self._cache[key] = result
+        self._cache.move_to_end(key)
+        if len(self._cache) > self._max_cache_size:
+            self._cache.popitem(last=False)
 
     def _mock_response(self, data: LLMInput) -> LLMOutput:
         # Fallback if no API key or error

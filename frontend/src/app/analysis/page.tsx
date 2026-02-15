@@ -8,11 +8,16 @@ import { Upload, FileText, AlertCircle, CheckCircle, Activity, Brain } from 'luc
 // Dynamically import Plotly to avoid SSR issues
 const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
 
+interface ChartData {
+    cancer_types_probability?: Record<string, number>;
+    risk_factors?: Record<string, number>;
+}
+
 interface AnalysisResult {
     is_relevant: boolean;
     reason: string;
     analysis?: string;
-    chart_data?: any;
+    chart_data?: ChartData;
 }
 
 export default function AnalysisPage() {
@@ -53,21 +58,25 @@ export default function AnalysisPage() {
                 },
             });
             setResult(response.data);
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error(err);
-            setError(err.response?.data?.detail || 'An error occurred during analysis.');
+            if (axios.isAxiosError(err)) {
+                setError(err.response?.data?.detail || 'An error occurred during analysis.');
+            } else {
+                setError('An unexpected error occurred.');
+            }
         } finally {
             setLoading(false);
         }
     };
 
     // Prepare chart data helpers
-    const renderProbabilityChart = (data: any) => {
+    const renderProbabilityChart = (data: ChartData) => {
         if (!data?.cancer_types_probability) return null;
 
         const probs = data.cancer_types_probability;
         const x = Object.keys(probs);
-        const y: number[] = Object.values(probs).map((v: any) => (v as number) * 100);
+        const y: number[] = Object.values(probs).map((v) => (v) * 100);
 
         return (
             <Plot
@@ -91,7 +100,7 @@ export default function AnalysisPage() {
         );
     };
 
-    const renderRiskChart = (data: any) => {
+    const renderRiskChart = (data: ChartData) => {
         if (!data?.risk_factors) return null;
 
         const risks = data.risk_factors;
@@ -163,6 +172,7 @@ export default function AnalysisPage() {
                                         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                                     />
                                     {previewUrl ? (
+                                        // eslint-disable-next-line @next/next/no-img-element
                                         <img
                                             src={previewUrl}
                                             alt="Preview"
