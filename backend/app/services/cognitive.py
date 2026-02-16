@@ -1,5 +1,6 @@
 import os
 import json
+from collections import OrderedDict
 from app.models.schemas import LLMInput, LLMOutput
 from dotenv import load_dotenv
 
@@ -16,11 +17,33 @@ class CognitiveService:
         else:
             self.model = None
 
-    def analyze(self, data: LLMInput) -> LLMOutput:
-        if not self.model:
-            return self._mock_response(data)
+        # LRU Cache: Store last 100 requests to avoid expensive API calls
+        self._cache = OrderedDict()
+        self._cache_max_size = 100
 
-        system_prompt = """You are a medical triage decision-support assistant.
+    def analyze(self, data: LLMInput) -> LLMOutput:
+        # Generate a cache key based on input data
+        # Lists (symptoms, risk_factors) are sorted and converted to tuples to be hashable
+        cache_key = (
+            data.cancer_type,
+            data.ml_confidence,
+            data.preliminary_cri,
+            tuple(sorted(data.symptoms)),
+            data.age,
+            tuple(sorted(data.risk_factors))
+        )
+
+        # Check cache
+        if cache_key in self._cache:
+            # Move to end (most recently used)
+            self._cache.move_to_end(cache_key)
+            return self._cache[cache_key]
+
+        # Generate response (from LLM or mock)
+        if not self.model:
+            result = self._mock_response(data)
+        else:
+            system_prompt = """You are a medical triage decision-support assistant.
 
 Your role is to assist in risk stratification for cancer-related cases.
 You must NOT diagnose cancer or confirm medical conditions.
@@ -39,7 +62,7 @@ Your task is to:
 
 If uncertainty exists, you must choose the safer, more conservative option."""
 
-        user_prompt = f"""
+            user_prompt = f"""
 Analyze the following patient data:
 
 {{
@@ -71,21 +94,28 @@ Respond ONLY in valid JSON with this exact format:
 }}
 """
 
-        try:
-            response = self.model.generate_content(
-                f"{system_prompt}\n\n{user_prompt}",
-                generation_config=genai.types.GenerationConfig(
-                    response_mime_type="application/json"
+            try:
+                response = self.model.generate_content(
+                    f"{system_prompt}\n\n{user_prompt}",
+                    generation_config=genai.types.GenerationConfig(
+                        response_mime_type="application/json"
+                    )
                 )
-            )
+
+                content = response.text
+                parsed = json.loads(content)
+                result = LLMOutput(**parsed)
+
+            except Exception as e:
+                print(f"LLM Error: {e}")
+                result = self._mock_response(data)
+
+        # Store result in cache
+        self._cache[cache_key] = result
+        if len(self._cache) > self._cache_max_size:
+            self._cache.popitem(last=False) # Remove oldest item (first item)
             
-            content = response.text
-            parsed = json.loads(content)
-            return LLMOutput(**parsed)
-            
-        except Exception as e:
-            print(f"LLM Error: {e}")
-            return self._mock_response(data)
+        return result
 
     def _mock_response(self, data: LLMInput) -> LLMOutput:
         # Fallback if no API key or error
