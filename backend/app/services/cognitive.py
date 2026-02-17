@@ -1,5 +1,6 @@
 import os
 import json
+import collections
 from app.models.schemas import LLMInput, LLMOutput
 from dotenv import load_dotenv
 
@@ -16,7 +17,36 @@ class CognitiveService:
         else:
             self.model = None
 
+        # In-memory LRU cache
+        self._cache = collections.OrderedDict()
+        self._cache_size = 100
+
     def analyze(self, data: LLMInput) -> LLMOutput:
+        # Create a cache key from the input data
+        # Ensure lists are sorted and converted to tuples for hashability
+        key = (
+            data.cancer_type,
+            data.ml_confidence,
+            data.preliminary_cri,
+            tuple(sorted(data.symptoms)),
+            data.age,
+            tuple(sorted(data.risk_factors))
+        )
+
+        if key in self._cache:
+            self._cache.move_to_end(key)
+            return self._cache[key]
+
+        result = self._perform_analysis(data)
+
+        # Update cache
+        self._cache[key] = result
+        if len(self._cache) > self._cache_size:
+            self._cache.popitem(last=False)
+
+        return result
+
+    def _perform_analysis(self, data: LLMInput) -> LLMOutput:
         if not self.model:
             return self._mock_response(data)
 
