@@ -1,5 +1,6 @@
 import os
 import json
+from collections import OrderedDict
 from app.models.schemas import LLMInput, LLMOutput
 from dotenv import load_dotenv
 
@@ -16,10 +17,45 @@ class CognitiveService:
         else:
             self.model = None
 
-    def analyze(self, data: LLMInput) -> LLMOutput:
-        if not self.model:
-            return self._mock_response(data)
+        # LRU Cache (max size 100)
+        # Key: (cancer_type, ml_confidence, preliminary_cri, tuple(sorted(symptoms)), age, tuple(sorted(risk_factors)))
+        self.cache = OrderedDict()
+        self.CACHE_SIZE = 100
 
+    def analyze(self, data: LLMInput) -> LLMOutput:
+        # Create a cache key from input data
+        # Lists (symptoms, risk_factors) must be sorted and converted to tuples for hashability
+        cache_key = (
+            data.cancer_type,
+            data.ml_confidence,
+            data.preliminary_cri,
+            tuple(sorted(data.symptoms)),
+            data.age,
+            tuple(sorted(data.risk_factors))
+        )
+
+        # Check cache
+        if cache_key in self.cache:
+            # Move to end to mark as recently used
+            self.cache.move_to_end(cache_key)
+            return self.cache[cache_key]
+
+        if not self.model:
+            result = self._mock_response(data)
+        else:
+            result = self._call_llm(data)
+
+        # Add to cache
+        self.cache[cache_key] = result
+        self.cache.move_to_end(cache_key)
+
+        # Enforce max size
+        if len(self.cache) > self.CACHE_SIZE:
+            self.cache.popitem(last=False)
+
+        return result
+
+    def _call_llm(self, data: LLMInput) -> LLMOutput:
         system_prompt = """You are a medical triage decision-support assistant.
 
 Your role is to assist in risk stratification for cancer-related cases.
