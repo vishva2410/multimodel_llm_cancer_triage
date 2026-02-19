@@ -20,7 +20,7 @@ async def root():
 async def health_check():
     return {"status": "healthy"}
 
-from app.api.routes import router as default_router
+from app.api.default_routes import router as default_router
 from app.api.routes import analysis
 
 app.include_router(default_router, prefix="/api/v1")
