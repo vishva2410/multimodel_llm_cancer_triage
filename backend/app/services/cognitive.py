@@ -1,5 +1,6 @@
 import os
 import json
+import collections
 from app.models.schemas import LLMInput, LLMOutput
 from dotenv import load_dotenv
 
@@ -16,9 +17,37 @@ class CognitiveService:
         else:
             self.model = None
 
+        # LRU Cache: (input_tuple) -> LLMOutput
+        # Max size 100 to keep memory usage low
+        self._cache = collections.OrderedDict()
+        self._cache_size = 100
+
+    def _create_cache_key(self, data: LLMInput) -> tuple:
+        """Creates a hashable tuple from LLMInput for caching."""
+        # Convert lists to sorted tuples to ensure order independence
+        symptoms = tuple(sorted(data.symptoms))
+        risk_factors = tuple(sorted(data.risk_factors))
+        return (
+            data.cancer_type,
+            data.ml_confidence,
+            data.preliminary_cri,
+            symptoms,
+            data.age,
+            risk_factors
+        )
+
     def analyze(self, data: LLMInput) -> LLMOutput:
+        # Check cache first
+        cache_key = self._create_cache_key(data)
+        if cache_key in self._cache:
+            # Move to end to mark as recently used
+            self._cache.move_to_end(cache_key)
+            return self._cache[cache_key]
+
         if not self.model:
-            return self._mock_response(data)
+            result = self._mock_response(data)
+            self._cache_result(cache_key, result)
+            return result
 
         system_prompt = """You are a medical triage decision-support assistant.
 
@@ -81,11 +110,23 @@ Respond ONLY in valid JSON with this exact format:
             
             content = response.text
             parsed = json.loads(content)
-            return LLMOutput(**parsed)
+            result = LLMOutput(**parsed)
+
+            # Cache successful result
+            self._cache_result(cache_key, result)
+            return result
             
         except Exception as e:
             print(f"LLM Error: {e}")
-            return self._mock_response(data)
+            result = self._mock_response(data)
+            # Also cache fallback response to avoid repeated failures/timeouts
+            self._cache_result(cache_key, result)
+            return result
+
+    def _cache_result(self, key, result):
+        self._cache[key] = result
+        if len(self._cache) > self._cache_size:
+            self._cache.popitem(last=False)
 
     def _mock_response(self, data: LLMInput) -> LLMOutput:
         # Fallback if no API key or error
