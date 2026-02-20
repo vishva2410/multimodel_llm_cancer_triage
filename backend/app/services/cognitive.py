@@ -1,5 +1,6 @@
 import os
 import json
+import collections
 from app.models.schemas import LLMInput, LLMOutput
 from dotenv import load_dotenv
 
@@ -16,9 +17,40 @@ class CognitiveService:
         else:
             self.model = None
 
+        # Initialize LRU Cache
+        self.cache = collections.OrderedDict()
+        self.MAX_CACHE_SIZE = 100
+
+    def _get_cache_key(self, data: LLMInput):
+        # Create a cache key using sorted lists to ensure order independence
+        return (
+            data.cancer_type,
+            data.ml_confidence,
+            data.preliminary_cri,
+            tuple(sorted(data.symptoms)),
+            data.age,
+            tuple(sorted(data.risk_factors))
+        )
+
+    def _update_cache(self, key, value):
+        self.cache[key] = value
+        self.cache.move_to_end(key)
+        if len(self.cache) > self.MAX_CACHE_SIZE:
+            self.cache.popitem(last=False)
+
     def analyze(self, data: LLMInput) -> LLMOutput:
+        cache_key = self._get_cache_key(data)
+
+        if cache_key in self.cache:
+            # Move to end to mark as recently used
+            self.cache.move_to_end(cache_key)
+            # Return a copy to prevent mutation of cached object
+            return self.cache[cache_key].model_copy()
+
         if not self.model:
-            return self._mock_response(data)
+            result = self._mock_response(data)
+            self._update_cache(cache_key, result)
+            return result.model_copy()
 
         system_prompt = """You are a medical triage decision-support assistant.
 
@@ -81,11 +113,16 @@ Respond ONLY in valid JSON with this exact format:
             
             content = response.text
             parsed = json.loads(content)
-            return LLMOutput(**parsed)
+            result = LLMOutput(**parsed)
+
+            self._update_cache(cache_key, result)
+            return result.model_copy()
             
         except Exception as e:
             print(f"LLM Error: {e}")
-            return self._mock_response(data)
+            result = self._mock_response(data)
+            self._update_cache(cache_key, result)
+            return result.model_copy()
 
     def _mock_response(self, data: LLMInput) -> LLMOutput:
         # Fallback if no API key or error
