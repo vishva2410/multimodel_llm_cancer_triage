@@ -1,5 +1,6 @@
 import os
 import json
+from collections import OrderedDict
 from app.models.schemas import LLMInput, LLMOutput
 from dotenv import load_dotenv
 
@@ -16,9 +17,40 @@ class CognitiveService:
         else:
             self.model = None
 
+        # LRU Cache: Key -> LLMOutput
+        # Stores last 100 successful analyses
+        self._cache = OrderedDict()
+        self._cache_max_size = 100
+
+    def _get_cache_key(self, data: LLMInput):
+        """Generates a deterministic cache key from input data."""
+        # Convert lists to sorted tuples to ensure order independence
+        symptoms_tuple = tuple(sorted(data.symptoms))
+        risk_factors_tuple = tuple(sorted(data.risk_factors))
+
+        return (
+            data.cancer_type,
+            data.ml_confidence,
+            data.preliminary_cri,
+            symptoms_tuple,
+            data.age,
+            risk_factors_tuple
+        )
+
     def analyze(self, data: LLMInput) -> LLMOutput:
+        # Check cache first
+        cache_key = self._get_cache_key(data)
+        if cache_key in self._cache:
+            # Cache hit: Move to end (most recently used)
+            self._cache.move_to_end(cache_key)
+            # Return a copy to prevent mutation of cached object
+            return self._cache[cache_key].model_copy()
+
         if not self.model:
-            return self._mock_response(data)
+            result = self._mock_response(data)
+            # We cache mock responses as they are deterministic based on input
+            self._add_to_cache(cache_key, result)
+            return result
 
         system_prompt = """You are a medical triage decision-support assistant.
 
@@ -81,11 +113,24 @@ Respond ONLY in valid JSON with this exact format:
             
             content = response.text
             parsed = json.loads(content)
-            return LLMOutput(**parsed)
+            result = LLMOutput(**parsed)
+
+            # Add to cache on success
+            self._add_to_cache(cache_key, result)
+
+            return result
             
         except Exception as e:
             print(f"LLM Error: {e}")
-            return self._mock_response(data)
+            result = self._mock_response(data)
+            # Do not cache transient errors
+            return result
+
+    def _add_to_cache(self, key, value: LLMOutput):
+        self._cache[key] = value
+        self._cache.move_to_end(key)
+        if len(self._cache) > self._cache_max_size:
+            self._cache.popitem(last=False) # Remove oldest (FIFO/LRU eviction)
 
     def _mock_response(self, data: LLMInput) -> LLMOutput:
         # Fallback if no API key or error
