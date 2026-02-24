@@ -16,7 +16,7 @@ class CognitiveService:
         else:
             self.model = None
 
-    def analyze(self, data: LLMInput) -> LLMOutput:
+    async def analyze(self, data: LLMInput) -> LLMOutput:
         if not self.model:
             return self._mock_response(data)
 
@@ -72,7 +72,7 @@ Respond ONLY in valid JSON with this exact format:
 """
 
         try:
-            response = self.model.generate_content(
+            response = await self.model.generate_content_async(
                 f"{system_prompt}\n\n{user_prompt}",
                 generation_config=genai.types.GenerationConfig(
                     response_mime_type="application/json"
