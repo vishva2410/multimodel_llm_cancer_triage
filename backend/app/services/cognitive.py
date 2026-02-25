@@ -16,9 +16,9 @@ class CognitiveService:
         else:
             self.model = None
 
-    def analyze(self, data: LLMInput) -> LLMOutput:
+    async def analyze(self, data: LLMInput) -> LLMOutput:
         if not self.model:
-            return self._mock_response(data)
+            return await self._mock_response(data)
 
         system_prompt = """You are a medical triage decision-support assistant.
 
@@ -72,7 +72,7 @@ Respond ONLY in valid JSON with this exact format:
 """
 
         try:
-            response = self.model.generate_content(
+            response = await self.model.generate_content_async(
                 f"{system_prompt}\n\n{user_prompt}",
                 generation_config=genai.types.GenerationConfig(
                     response_mime_type="application/json"
@@ -85,9 +85,9 @@ Respond ONLY in valid JSON with this exact format:
             
         except Exception as e:
             print(f"LLM Error: {e}")
-            return self._mock_response(data)
+            return await self._mock_response(data)
 
-    def _mock_response(self, data: LLMInput) -> LLMOutput:
+    async def _mock_response(self, data: LLMInput) -> LLMOutput:
         # Fallback if no API key or error
         # Simple logic to simulate LLM reasoning
         
