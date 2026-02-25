@@ -44,7 +44,7 @@ async def analyze_case(
         age=age,
         risk_factors=risk_factors_list
     )
-    llm_output = cognitive_service.analyze(llm_input)
+    llm_output = await cognitive_service.analyze(llm_input)
     
     # 4. Final Calculation
     final_cri = max(0, min(100, preliminary_cri + llm_output.risk_adjustment))
