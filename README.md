@@ -1,4 +1,4 @@
-# multi modal 
+# multi modal  
     
 ## Overview
 OncoDetect X is an AI-assisted cancer triage and decision-support system. It combines deep learning, deterministic risk logic, LLM-based cognitive reasoning, and **Gemini-powered multi-modal oncology analysis** to provide a comprehensive, multi-layered risk assessment for oncology cases.
